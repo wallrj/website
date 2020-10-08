@@ -109,7 +109,59 @@ the connection parameters are slightly different.
 
 In order to set up a Venafi Trust Protection Platform `Issuer`, you must first
 create a Kubernetes `Secret` resource containing your Venafi TPP API
-credentials:
+credentials.
+
+NOTE: For TPP >= 19.2 use Token Authentication
+and for older versions of TPP, use username / password authentication.
+
+#### Token Authentication
+
+Use Token Authentication if you are connecting to TPP >= 19.2.
+
+1. [Set up token authentication](https://docs.venafi.com/Docs/19.2/TopNav/Content/SDK/WebSDK/t-sdk-Setup-OAuth.php).
+2. Create a new user with sufficient privileges to manage and revoke certificates in a particular policy zone.
+
+   E.g. k8s-xyz-automation
+
+3. [Create a new application integration](https://docs.venafi.com/Docs/19.2/TopNav/Content/API-ApplicationIntegration/t-APIAppIntegrations-creatingNew-Aperture.htm)
+
+   Create an application integration with name and ID `cert-manager`.
+   Set the "API Access Settings" to `Certificates: Read,Manage,Revoke`.
+
+   "Edit Access" to the new application integration, and allow it to be used by the user you created earlier.
+
+4. [Generate an access token](https://github.com/Venafi/vcert/blob/v4.11.0/README-CLI-PLATFORM.md#obtaining-an-authorization-token)
+
+   ```
+   vcert getcred \
+     --username k8s-xyz-automation \
+     --password somepassword \
+     -u https://tpp.example.com/vedsdk \
+     --client-id cert-manager \
+     --scope "certificate:manage,revoke"
+   ```
+
+   This will print an access token to `stdout`. E.g.
+
+   ```
+   vCert: 2020/10/07 16:34:27 Getting credentials
+   access_token:  I69n.............y1VjNJT3o9U0Wko19g==
+   access_token_expires:  2021-01-05T15:34:30Z
+   refresh_token:  Zd48............RJ1sAK6MTnebXlm7+Q==
+   ```
+
+5. Save the token to a Secret in the Kubernetes cluster
+
+```bash
+$ kubectl create secret generic \
+       tpp-secret \
+       --namespace=<NAMESPACE OF YOUR ISSUER RESOURCE> \
+       --from-literal=token='YOUR_TPP_ACCESS_TOKEN'
+```
+
+#### Username / Password Authentication
+
+Use username / password authentication is deprecated and should only be used when connecting to TPP < 19.2.
 
 ```bash
 $ kubectl create secret generic \
