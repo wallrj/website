@@ -114,11 +114,47 @@ credentials.
 NOTE: For TPP >= 19.2 use Token Authentication
 and for older versions of TPP, use username / password authentication.
 
-#### Token Authentication
+#### Refresh Token Authentication
 
-Use Token Authentication if you are connecting to TPP >= 19.2.
+Use refresh-token authentication if you are connecting to TPP >= 19.2 and you want to regularly and automatically rotate the access-token.
+
+TPP supports a refresh token mechanism which allows an application to regularly and automatically rotate its API access-tokens
+and the refresh-token its self.
+
+If you supply a refresh-token and client-id in the Secret for the Venafi Issuer,
+cert-manager will use that to request a short-lived access-token from the TPP authorization server,
+and a new refresh-token for use next time the access-token needs to be refreshed.
+cert-manager will update the Venafi Issuer Secret with that new refresh-token
+so that it is available, even if cert-manager is restarted.
+
+The advantage of this mechanism is that
+it reduces the risk of an attacker using a stolen token to interact with the TPP API because:
+
+* the access-tokens used by cert-manager to interact with the TPP resource API will be short lived.
+* the refresh-tokens used by cert-manager to interact with the TPP authorization API are single-use.
+
+The disadvantage of this mechanism is that
+there is a risk that cert-manager fails to store the new refesh-token when it is rotated,
+either because of a network failure during the HTTP transaction with the TPP authorization server,
+or because the cert-manager process is killed after starting the refresh-token transaction
+but before persisting the refresh-token to a Kubernetes Secret.
+
+This disadvantage is not unique to TPP.
+It is noted in [Section 5.2.2.3.  Refresh Token Rotation](https://tools.ietf.org/html/rfc6819#section-5.2.2.3)
+of the RFC [OAuth 2.0 Threat Model and Security Considerations](https://tools.ietf.org/html/rfc6819):
+
+ Note: This measure may cause problems in clustered environments,
+ since usage of the currently valid refresh token must be ensured.  In
+ such an environment, other measures might be more appropriate.
+
+NOTE: This problem may be addressed in a future version of Venafi TPP by adding the ability to create a long-lived / re-usable refresh-token.
+
+With those caveats in mind, here are the steps required to set up TPP and cert-manager for refresh-token based authorization:
 
 1. [Set up token authentication](https://docs.venafi.com/Docs/19.2/TopNav/Content/SDK/WebSDK/t-sdk-Setup-OAuth.php).
+
+   NOTE: Select "Refresh Token Enabled" and set a *short* "Token Validity (days)".
+
 2. Create a new user with sufficient privileges to manage and revoke certificates in a particular policy zone.
 
    E.g. k8s-xyz-automation
@@ -141,7 +177,7 @@ Use Token Authentication if you are connecting to TPP >= 19.2.
      --scope "certificate:manage,revoke"
    ```
 
-   This will print an access token to `stdout`. E.g.
+   This will print an access-token and a refresh-token to `stdout`. E.g.
 
    ```
    vCert: 2020/10/07 16:34:27 Getting credentials
@@ -150,18 +186,74 @@ Use Token Authentication if you are connecting to TPP >= 19.2.
    refresh_token:  Zd48............RJ1sAK6MTnebXlm7+Q==
    ```
 
-5. Save the token to a Secret in the Kubernetes cluster
+5. Save the client-id and refresh-token to a Secret in the Kubernetes cluster
 
 ```bash
 $ kubectl create secret generic \
        tpp-secret \
        --namespace=<NAMESPACE OF YOUR ISSUER RESOURCE> \
-       --from-literal=token='YOUR_TPP_ACCESS_TOKEN'
+       --from-literal=client-id=cert-manager \
+       --from-literal=refresh-token='YOUR_TPP_REFRESH_TOKEN'
+```
+
+
+#### Access Token Authentication
+
+Use access-token authentication if you are connecting to TPP >= 19.2 and if do not want to use a refresh-token mechanism
+
+NOTE: The refresh token mechanism mechanism may not be enabled on your TPP
+and using the refresh-token mechanism introduces a point of failure (see above).
+
+
+1. [Set up token authentication](https://docs.venafi.com/Docs/19.2/TopNav/Content/SDK/WebSDK/t-sdk-Setup-OAuth.php).
+
+   NOTE: Do not select "Refresh Token Enabled" and set a *long* "Token Validity (days)".
+
+2. Create a new user with sufficient privileges to manage and revoke certificates in a particular policy zone.
+
+   E.g. k8s-xyz-automation
+
+3. [Create a new application integration](https://docs.venafi.com/Docs/19.2/TopNav/Content/API-ApplicationIntegration/t-APIAppIntegrations-creatingNew-Aperture.htm)
+
+   Create an application integration with name and ID `cert-manager`.
+   Set the "API Access Settings" to `Certificates: Read,Manage,Revoke`.
+
+   "Edit Access" to the new application integration, and allow it to be used by the user you created earlier.
+
+4. [Generate an access token](https://github.com/Venafi/vcert/blob/v4.11.0/README-CLI-PLATFORM.md#obtaining-an-authorization-token)
+
+   ```
+   vcert getcred \
+     --username k8s-xyz-automation \
+     --password somepassword \
+     -u https://tpp.example.com/vedsdk \
+     --client-id cert-manager \
+     --scope "certificate:manage,revoke"
+   ```
+
+   This will print an access-token to `stdout`. E.g.
+
+   ```
+   vCert: 2020/10/07 16:34:27 Getting credentials
+   access_token:  I69n.............y1VjNJT3o9U0Wko19g==
+   access_token_expires:  2021-01-05T15:34:30Z
+   ```
+
+5. Save the access-token to a Secret in the Kubernetes cluster
+
+```bash
+$ kubectl create secret generic \
+       tpp-secret \
+       --namespace=<NAMESPACE OF YOUR ISSUER RESOURCE> \
+       --from-literal=access-token='YOUR_TPP_ACCESS_TOKEN'
 ```
 
 #### Username / Password Authentication
 
-Use username / password authentication is deprecated and should only be used when connecting to TPP < 19.2.
+NOTE: username / password authentication is deprecated and should only be used when connecting to TPP < 19.2.
+It requires the username and password of a TPP user to be stored in the Kubernetes cluster
+and it does not allow scoped access to the API.
+This means that if these credentials are leaked an attacker may gain long term access to the TPP API and web UI.
 
 ```bash
 $ kubectl create secret generic \
@@ -204,7 +296,7 @@ spec:
       caBundle: <base64 encoded string of caBundle PEM file, or empty to use system root CAs>
       credentialsRef:
         name: tpp-secret
-```
+-```
 
 You can then create the `Issuer` using `kubectl create -f`.
 ```bash
