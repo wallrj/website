@@ -31,6 +31,14 @@ as well as how to compile, run and test cert-manager and all it's components.
 This document sometimes can get out of date due to changes in the code and/or tooling. PRs to this part are
 also very welcome if you happen to find an out of date part.
 
+## Google Summer of Code
+
+## Google Season of Docs
+
+The cert-manager team have submitted the following proposals for [Google Season of Docs](https://developers.google.com/season-of-docs):
+
+1. [Proposal 1: Improve the navigation structure of the cert-manager website]()
+
 ## Meetings
 
 All cert-manager meetings are open for everyone to join.
