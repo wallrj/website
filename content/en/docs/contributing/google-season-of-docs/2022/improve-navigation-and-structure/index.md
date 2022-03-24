@@ -1,6 +1,6 @@
 ---
-title: "Google Season of Docs 2022 : Proposal - Improve the Navigation and Structure of the cert-manager Website"
-linkTitle: "Proposal - Improve the Navigation and Structure"
+title: "Improve the Navigation and Structure of the cert-manager Website"
+linkTitle: "Improve the Navigation and Structure of the cert-manager Website"
 weight: 70
 type: "docs"
 ---
@@ -37,7 +37,7 @@ The scope of this project is as follows:
 1. Identify and describe three target audiences.
 2. Identify three key top tasks for each of these audiences.
 3. Audit the existing documentation and create a friction log of the current documentation.
-4. Using the friction log as a baseline, re-organize the documentation to minimise friction for three top tasks.
+4. Using the friction log as a baseline, re-organize the documentation to minimize friction for three top tasks.
 6. Incorporate feedback from documentation testers (volunteers in the project) and the wider cert-manager community.
 7. Work with the cert-manager team to publish the documentation on cert-manager.io.
 8. Create documentation for website contributors explaining how we structure our content around audiences and tasks.

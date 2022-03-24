@@ -1,10 +1,9 @@
 ---
 title: "Google Season of Docs 2022"
-linkTitle: "2022 Projects"
+linkTitle: "2022"
 weight: 70
 type: "docs"
 ---
 
-## Proposals
-
-1. [Improve the Navigation and Structure of the cert-manager Website](improve-navigation-and-structure/)
+We have registered our interest to  participate in Google Season of Docs 2022.
+Here are our project proposals.
