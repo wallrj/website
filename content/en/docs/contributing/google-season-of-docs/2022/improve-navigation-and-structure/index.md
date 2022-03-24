@@ -66,3 +66,9 @@ we will measure a baseline number of clicks required to achieve the task and we 
 | July        | Project Completion                               |
 
 ## Budget
+
+|                                  Budget item                                  | Amount  ($) | Running Total ($) |              Notes              |
+|-------------------------------------------------------------------------------|-------------|-------------------|---------------------------------|
+| Technical writer audit and restructuring of the cert-manager.io documentation | 12,000      | 12,000            |                                 |
+| Volunteer stipends                                                            | 1,500       | 12,500            | 3 volunteer stipends x 500 each |
+| TOTAL                                                                         |             | 12,500            |                                 |
