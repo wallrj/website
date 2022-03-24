@@ -1,4 +1,4 @@
-# Proposal: Improve the navigation structure of the cert-manager website
+# GSoD 2022 Proposal: Improve the Navigation and Structure of the cert-manager Website
 
 Right now the content is not designed with our target audiences in mind.
 For example a new user will not easily find a guide explaining how to install cert-manager on AWS and configure it for Let’s Encrypt.
