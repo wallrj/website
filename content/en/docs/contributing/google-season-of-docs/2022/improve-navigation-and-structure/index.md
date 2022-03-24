@@ -39,10 +39,23 @@ The scope of this project is as follows:
 3. Audit the existing documentation and create a friction log of the current documentation.
 4. Using the friction log as a baseline, re-organize the documentation to minimise friction for three top tasks.
 6. Incorporate feedback from documentation testers (volunteers in the project) and the wider cert-manager community.
-7. Work with the cert-manager team to update the documentation on cert-manager.io.
+7. Work with the cert-manager team to publish the documentation on cert-manager.io.
 8. Create documentation for website contributors explaining how we structure our content around audiences and tasks.
 
 ## Measuring success
 
 After the technical writer has helped us identify the 3 key tasks for each audience
 we will measure a baseline number of clicks required to achieve the task and we will aim to minimize the number of clicks for each task.
+
+## Timeline
+
+| Dates       | Action Items                                     |
+|-------------|--------------------------------------------------|
+| May         | Orientation                                      |
+| May / June  | Identify audiences and tasks                     |
+| May / June  | Audit and friction log                           |
+| June        | Restructuring tasks                              |
+| June / July | Incorporating feedback                           |
+| June / July | Publish to cert-manager.io                       |
+| July        | Finish writing guidance for website contributors |
+| July        | Project Completion                               |
