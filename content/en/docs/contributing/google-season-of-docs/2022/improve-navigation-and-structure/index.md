@@ -1,4 +1,18 @@
-# Google Season of Docs 2022 : Proposal - Improve the Navigation and Structure of the cert-manager Website
+---
+title: "Google Season of Docs 2022 : Proposal - Improve the Navigation and Structure of the cert-manager Website"
+linkTitle: "Proposal - Improve the Navigation and Structure"
+weight: 70
+type: "docs"
+---
+
+## About cert-manager
+
+cert-manager (current version 1.7.2, first release in October 2017) is an Apache-2.0 licensed Kubernetes add-on to automate the management and issuance of TLS certificates.
+Our typical contributors are Go developers from around the world with experience of the Kubernetes ecosystem with experience contributing to core Kubernetes components and Kubernetes operators.
+Our users are often developers and system administrators who are trying to automate the rotation of TLS certificates for applications running in their Kubernetes clusters.
+Our largest users have cert-manager installed on multiple Kubernetes clusters and managing many thousands of TLS certificates.
+
+## Project Overview
 
 Right now the content is not designed with our target audiences in mind.
 For example a new user will not easily find a guide explaining how to install cert-manager on AWS and configure it for Let’s Encrypt.
