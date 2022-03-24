@@ -59,3 +59,5 @@ we will measure a baseline number of clicks required to achieve the task and we 
 | June / July | Publish to cert-manager.io                       |
 | July        | Finish writing guidance for website contributors |
 | July        | Project Completion                               |
+
+## Budget
