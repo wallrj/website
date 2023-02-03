@@ -18,17 +18,16 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# Runs automated checks of website content, first building website content
-# and then re-generating latest API / CLI docs.
-
 # Should be run in CI to verify changes.
+# Run by a prow job which we plan to remove.
+# * https://github.com/jetstack/testing/blob/master/config/jobs/cert-manager/website/cert-manager-website-presubmits.yaml
+#
+# TODO(wallrj): Remove this when the prow job has been removed
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-cd "${REPO_ROOT}"
-
-echo "+++ Building site fully"
-"${REPO_ROOT}/scripts/build-release"
+echo "+++ Installing dependencies"
+npm ci
 
 echo "+++ Running verification checks"
-"${REPO_ROOT}/scripts/_verify"
+"${REPO_ROOT}/scripts/verify"

@@ -96,50 +96,30 @@ Use `{/* my comment */}` rather than the HTML-style comments you'd normally use 
 
 ## Website Development Tooling
 
-### Development Server
+First [install nodejs (and package manager called `npm`)](https://nodejs.org/en/).
 
-#### Ideal development environment: Netlify CLI
-
-The best development environment uses the Netlify CLI to serve the site locally. The Netlify CLI server much more
-closely matches the environment in which the website is deployed, and will enable local debugging of redirects and
-environment variables.
-
-To run this server, install the [Netlify CLI](https://docs.netlify.com/cli/get-started/).
-
-This server supports hot-reloading, but note that hot-reloading of the `public/_redirects` file is only enabled
-if you also install `entr`, which is available in Linux package managers and in Homebrew.
+Then install all the tools and packages required to build the website as follows:
 
 ```bash
-./scripts/server-netlify
+npm ci
 ```
 
-This script will run `npm install` and then start a development server at `http://localhost:8888`.
+This command is similar to `npm install` but it ensures that you will have a clean install of all the dependencies.
 
-Note that the server will also be accessible locally at port 3000, but that on this port there'll be no
-support for debugging redirects or environment variables. Use port 8888.
+### Development Server
 
-#### Simpler development environment
-
-The Netlify environment above should be preferred.
-
-If you don't want to install any other tools though, you can run the local development server on its own
-with no support for debugging redirects or environment variables.
-
-To run the simpler, less-powerful server, run:
+Once you have installed all the packages and tools using `npm ci` you can run a local development server as follows:
 
 ```bash
 ./scripts/server
 ```
 
-This script will run `npm install` and then start a development server at `http://localhost:3000`.
-
-Initial builds of a page on the development server can be quite slow - a few seconds - but
-after the initial build changes should be picked up quickly and the development server
-should be snappy to use.
+Note that the server will also be accessible locally at port 3000, but that on this port there'll be no
+support for debugging redirects or environment variables. Use port 8888.
 
 ### Running Verification Scripts
 
-After you have made changes to the website, you should run the `verify` scripts
+After you have made changes to the website, you should run the `verify` script
 to ensure things like spelling are valid.
 
 To run all verification checks:
@@ -148,26 +128,15 @@ To run all verification checks:
 ./scripts/verify
 ```
 
-This will automatically run a number of checks against your local environment.
+This will automatically run a number of checks against your local environment, including:
 
-If you want to be thorough, you can run `./scripts/verify-release` to also regenerate API / CLI docs
-before verification, but that check is slower and unlikely to provide any useful insight.
-
-To run quick lint checks on the nextjs code, run [next lint](https://nextjs.org/docs/basic-features/eslint):
-
-```bash
-npm run lint
-```
-
-To check the links in all pages, run [markdown-link-check](https://github.com/tcort/markdown-link-check):
-
-```bash
-npm run markdown-link-check
-```
+* Lint checks on the nextjs code using [next lint](https://nextjs.org/docs/basic-features/eslint).
+* Link checks on all pages using [markdown-link-check](https://github.com/tcort/markdown-link-check).
+* Spelling in all pages using [mdspell](https://github.com/lukeapage/node-markdown-spellcheck).
+* Formatting of the markdown in all pages using [remark](https://github.com/remarkjs/remark).
 
 > ℹ️ All these checks are also run automatically for pull requests.
 > The results will be reported in the [checks summary](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks) at the bottom of your GitHub PR.
-> Read the [cert-manager-website-presubmits.yaml prow configuration file](https://github.com/jetstack/testing/blob/master/config/jobs/cert-manager/website/cert-manager-website-presubmits.yaml) and the [check.yaml workflow file](.github/workflows/check.yaml) for more details.
 
 ### Building for a Release
 
@@ -181,12 +150,9 @@ release process can be run through one script:
 ./scripts/build-release
 ```
 
-If you want to test that the build still works locally, you can run `./scripts/build` to build while
-skipping regeneration of API / CLI docs.
-
 ### API / CLI Documentation Generation
 
-To generate API / CLI reference docs manually, run:
+To generate API / CLI reference docs run:
 
 ```bash
 ./scripts/gendocs/generate

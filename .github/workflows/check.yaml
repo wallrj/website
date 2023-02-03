@@ -1,11 +1,26 @@
+# Run fast content checking tools and code linting tools in parallel.
 name: check
 on:
   push:
     branches: [master]
   pull_request:
+env:
+  # Force color output in mdspell.
+  # See https://github.com/lukeapage/node-markdown-spellcheck/issues/36#issuecomment-482649408
+  FORCE_COLOR: 1
 jobs:
-  lint:
+  # Run all the npm check:* scripts in parallel.
+  npm_run:
+    name: npm run
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        npm_script:
+          - check:next-lint
+          - check:links
+          - check:spelling
+          - check:markdown
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
@@ -13,14 +28,11 @@ jobs:
           node-version: 16
           cache: npm
       - run: npm ci
-      - run: npm run lint
-  link-check:
+      - run: npm run ${{ matrix.npm_script }}
+  # This job only succeeds if all the npm run check:* scripts succeed.
+  # This job is marked as required in the branch protection configuration instead of requiring all the individual check: jobs.
+  pull-cert-manager-website-verify:
     runs-on: ubuntu-22.04
+    needs: npm_run
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 16
-          cache: npm
-      - run: npm ci
-      - run: npm run markdown-link-check
+      - run: "true"
