@@ -12,14 +12,15 @@ how cert-manager handles DNS01 challenges.
 > (AWS) and that you already have a hosted zone in Route53.
 >
 > 📖 Read
-> [Tutorial: Deploy cert-manager on Amazon Elastic Kubernetes (EKS) and use Let's Encrypt to sign a certificate for an HTTPS website](../../../tutorials/getting-started-aws-letsencrypt/README.md),
-> which contains end-to-end instructions for those who are new to cert-manager and AWS.
+> [Deploy cert-manager on AWS Elastic Kubernetes Service (EKS) and use Let's Encrypt to sign a certificate for an HTTPS website](../../../tutorials/getting-started-aws-letsencrypt/README.md),
+> a tutorial which explains how to create an EKS cluster, install cert-manager, and configuring ACME ClusterIssuer using Route53 for DNS-01 challenges.
 
-## Set up an IAM Role
+## Set up an IAM Policy
 
-cert-manager needs to be able to add records to Route53 in order to solve the
-DNS01 challenge. To enable this, create a IAM policy with the following
-permissions:
+To solve a DNS01 challenge, cert-manager needs permission to add TXT records to your Route53 zone.
+It needs permission to delete the TXT records, after the challenge succeeds or fails.
+It also needs permission to list the hosted zones, unless you use the `hostedZoneID` field.
+To enable this, create an IAM policy with the following permissions in the AWS account of the Route53 zone:
 
 ```json
 {
@@ -47,30 +48,194 @@ permissions:
 }
 ```
 
-> Note: The `route53:ListHostedZonesByName` statement can be removed if you
+> ℹ️ The `route53:ListHostedZonesByName` statement can be removed if you
 > specify the (optional) `hostedZoneID`. You can further tighten the policy by
 > limiting the hosted zone that cert-manager has access to (e.g.
 > `arn:aws:route53:::hostedzone/DIKER8JEXAMPLE`).
+>
+> 📖 Read about [actions supported by Amazon Route 53](https://docs.aws.amazon.com/Route53/latest/APIReference/API_Operations_Amazon_Route_53.html),
+> in the [Amazon Route 53 API Reference](https://docs.aws.amazon.com/Route53/latest/APIReference/Welcome.html).
+>
+> 📖 Learn how [`eksctl` can automatically create the cert-manager IAM policy](https://eksctl.io/usage/iam-policies/#cert-manager-policy), if you use EKS.
 
 ## Credentials
 
-You have two options for the set up - either create a user or a role and attach
-that policy from above.  Using a role is considered best practice because you do
-not have to store permanent credentials in a secret.
+cert-manager uses the Route53 API to create, update and then delete TXT records, solve a DNS01 challenge.
+The [requests to the Route53 API must be signed](https://docs.aws.amazon.com/Route53/latest/APIReference/requests-authentication.html)
+using an access key ID and a secret access key.
+There are several ways for cert-manager to get the access key ID and secret access key.
+These mechanisms are categorized as either "ambient" or "non-ambient".
+Here's what that means:
 
-cert-manager supports two ways of specifying credentials:
+**Ambient credentials** are credentials which are made available in the cert-manager controller Pod via:
+- A mounted Kubernetes ServiceAccount token (`AWS_WEB_IDENTITY_TOKEN_FILE`), with IAM Roles for Service Accounts (IRSA).
+- A Kubernetes HTTPS endpoint () for Pod Identity.
+- An EC2 HTTPS endpoint (`https://169.254.169.254/latest/meta-data/iam/security-credentials`), for IMDS instance credentials.
+- Environment variables (`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`), if cert-manager has been deployed with static environment variable credentials.
+- A mounted AWS configuration file (`~/.aws/credentials`), if cert-manager has been deployed with static mounted credentials.
 
-- explicit by providing an `accessKeyID` or an `accessKeyIDSecretRef`, and a `secretAccessKeySecretRef`
-- or implicit (using [metadata
-  service](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html)
-  or [environment variables or credentials
-  file](https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html#specifying-credentials).
+The advantage of ambient credentials is that they are easier to set up, well
+documented, and AWS provide cluster helpers to automate the configuration.
+The disadvantage of ambient credentials is that they are globally available to
+all ClusterIssuer and all Issuer resources, which means that in a multi-tenant
+environment, any tenant who has permission to create Issuer or ClusterIssuer may
+use the ambient credentials and gain the permissions granted to that account.
 
-cert-manager also supports specifying a `role` to enable cross-account access
-and/or limit the access of cert-manager. Integration with
-[`kiam`](https://github.com/uswitch/kiam) and
-[`kube2iam`](https://github.com/jtblin/kube2iam) should work out of the box.
+**Non-ambient credentials** are configured on the Issuer or ClusterIssuer.
+For example:
+- Access key Secret reference: `{cluster,}issuer.spec.acme.solvers.dns01.route53.{accessKeyIDSecretRef,secretAccessKeySecretRef}`
+- ServiceAccount reference`{cluster,}issuer.spec.acme.solvers.dns01.route53.auth.kubernetes.serviceAccountRef`
 
+The advantage of non-ambient credentials is that cert-manager can perform Route53 operations in a multi-tenant environment.
+Each tenant can be granted permission to create and update Issuer resources in their namespace and they can provide their own AWS credentials in their namespace.
+
+> ⚠️ By default, cert-manager will only use ambient credentials for
+> `ClusterIssuer` resources, not `Issuer` resources.
+>
+> This is to prevent unprivileged users, who have permission to create Issuer
+> resources, from issuing certificates using credentials that cert-manager
+> incidentally has access to.
+> ClusterIssuer resources are cluster scoped (not namespaced) and only platform
+> administrators should be granted permission to create them.
+>
+> ⚠️ It is possible (but not recommended) to enable this authentication mechanism
+> for `Issuer` resources, by setting the `--issuer-ambient-credentials` flag on
+> the cert-manager controller to true.
+
+### (Non-ambient) OIDC with dedicated Kubernetes ServiceAccount resources
+
+In this scenario, cert-manager authenticates to Route53 using temporary credentials obtained from STS,
+by exchanging a temporary Kubernetes ServiceAccount token for a temporary AWS access key.
+Some key characteristics of this mechanism are:
+- Uses short-lived credentials.
+- Does not require key rotation.
+- Does not require Kubernetes Secret resources.
+- Works with any Kubernetes cluster.
+- Good isolation of Issuer permissions.
+- Complicated to configure.
+
+> 📖 This is the mechanism used in the tutorial:
+> [Deploy cert-manager on AWS Elastic Kubernetes Service (EKS) and use Let's Encrypt to sign a certificate for an HTTPS website](../../../tutorials/getting-started-aws-letsencrypt/README.md),
+>.
+
+#### Mechanism
+
+1. cert-manager gets a [Kubernetes ServiceAccount token](https://kubernetes.io/docs/concepts/security/service-accounts/#authenticating-credentials) (a signed JWT), from the Kubernetes API server.
+1. cert-manager sends the signed JWT to [AWS Security Token Service (STS)](https://docs.aws.amazon.com/STS/latest/APIReference/welcome.html)
+   invoking the [AssumeRoleWithWebIdentity Action](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html),
+   also supplying the Role ARN specified in the ClusterIssuer (or Issuer).
+1. STS returns a [Temporary security credential](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp.html)
+   (a short lived AWS access key).
+1. cert-manager uses the temporary credential to authenticate to [AWS Route53](https://docs.aws.amazon.com/Route53/latest/APIReference/API_Operations.html)
+   invoking various actions to create TXT records to satisfy the ACME challenge.
+   > ℹ️ It [signs the requests](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html) using the short lived access key.
+
+#### Configuration
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    ...
+    solvers:
+    - dns01:
+        route53:
+          role: arn:aws:iam::YYYYYYYYYYYY:role/dns-manager
+          auth:
+            kubernetes:
+              serviceAccountRef:
+                name: <service-account-name> # The name of the service account created
+```
+
+
+### (Ambient) IAM Roles for Service Accounts (IRSA) with mounted ServiceAccount token
+
+In this scenario, cert-manager authenticates to Route53 using temporary credentials obtained from STS,
+by exchanging a temporary Kubernetes ServiceAccount token for a temporary AWS access key.
+The Kubernetes ServiceAccount token is mounted into the Pod of the cert-manager controller.
+
+In AWS this mechanism is branded as [IAM Roles for Service Accounts (IRSA)](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
+IRSA comprises:
+1. The [Amazon EKS Pod Identity Webhook](https://github.com/aws/amazon-eks-pod-identity-webhook)
+   which runs in the cluster,
+   watches for Pods that use a service account with the following annotation: `eks.amazonaws.com/role-arn`, and
+   adds a [ServiceAccount token volume projection](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#serviceaccount-token-volume-projection) to the Pod and adds an environment variable to the Pod to allow the AWS SDK to discover and load the token.
+2. A client using an [AWS SDK with default credential loader](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts-minimum-sdk.html),
+   which is able to discover the projected token created by the webhook, and
+   automatically load it and send it to STS invoking the AssumeRoleWithWebIdentity action.
+
+Some key characteristics of this mechanism are:
+- Uses short-lived credentials.
+- Does not require key rotation.
+- Does not require Kubernetes Secret resources.
+- Easy to configure on EKS clusters
+- Poor isolation of Issuer permissions
+
+#### Mechanism
+
+1. Kubernetes API server regularly generates a signed JWT which is mounted into the cert-manager controller Pod,
+   at file path which is stored in the environment variable: `AWS_WEB_IDENTITY_TOKEN_FILE`.
+1. cert-manager reads the signed JWT from the file system.
+1. cert-manager connects to [AWS Security Token Service (STS)](https://docs.aws.amazon.com/STS/latest/APIReference/welcome.html)
+   invoking the [AssumeRoleWithWebIdentity Action](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html),
+   supplying the Kubernetes signed JWT and the Role ARN specified in the ClusterIssuer (or Issuer).
+1. STS returns a [Temporary security credential](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp.html)
+   (a short lived AWS access key).
+1. cert-manager connects to [AWS Route53](https://docs.aws.amazon.com/Route53/latest/APIReference/API_Operations.html)
+   invoking various actions to create TXT records to satisfy the ACME challenge.
+   It [signs the requests](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html) using the short lived access key.
+
+
+> 📖 Read [Configure the AWS Security Token Service endpoint for a service account](https://docs.aws.amazon.com/eks/latest/userguide/configure-sts-endpoint.html) if you need to change the
+
+#### Configuration
+
+TODO
+
+### (Ambient) Load credentials from EC2 Instance Metadata Service (IMDS)
+
+In this scenario, cert-manager authenticates to Route53 using temporary credentials [obtained from the EC2 Instance Metadata Service (IMDS)](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-metadata-security-credentials.html).
+The temporary credentials correspond to the role specified in the [instance profile](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html).
+
+| ✔️ Advantages                     | ✖️ Disadvantages                                     |
+|----------------------------------|-----------------------------------------------------|
+| Uses short-lived credentials     |                                                     |
+| No key rotation necessary        | **Poor isolation of Issuer permissions**            |
+| No Kubernetes Secrets            | **(Issuers can assume the Roles of other Issuers)** |
+| **Minimal configuration needed** | **Works ONLY on EKS clusters**                      |
+
+#### Mechanism
+
+If you enable debug logging you will see the following series of requests to the EC2 metadata service at `Host: 169.254.169.254`:
+
+1. `PUT /latest/api/token`:
+   Get an authentication token.
+1. `GET /latest/meta-data/iam/security-credentials/`:
+   Discover the instance profile Role name.
+1. `GET /latest/meta-data/iam/security-credentials/<ROLE_NAME>`:
+   Get temporary access key for the instance profile Role.
+
+Then you will see a series of requests to Route53:
+1. `GET /2013-04-01/hostedzonesbyname?dnsname=<DNS_NAME>`: Discover the Hosted Zone for the DNS name.
+1. `POST /2013-04-01/hostedzone/<HOSTED_ZONE_ID>/rrset`: Create a change set with the ACME challenge TXT record.
+1. `GET /2013-04-01/change/<CHANGE_ID`: Check the status of the change set.
+
+> ℹ️ If you **also** specify an Issuer `role`, cert-manager will additionally connect to STS and invoke the `AssumeRole` action,
+> to get temporary credentials for the assumed role.
+> It will then use those temporary credentials to authenticate with Route53.
+>
+> 📖 Read [Cross Account Access](#cross-account-access) (below) to learn about the required IAM configuration.
+
+### Load User access key from dedicated Secret
+
+TODO
+
+### Load User access key from mounted Secret
+
+TODO
 
 ## Cross Account Access
 
@@ -386,3 +551,37 @@ spec:
               serviceAccountRef:
                 name: <service-account-name> # The name of the service account created
 ```
+
+
+### Troubleshooting
+
+#### Why is the Issuer `region` field required?
+
+The Issuer `region` field should not be required.
+cert-manager uses [AWS SDK for Go V2](https://aws.github.io/aws-sdk-go-v2/),
+which will discover the region from the environment when running on AWS EKS or EC2.
+
+[Route53 API is a global service with a single global endpoint](https://docs.aws.amazon.com/general/latest/gr/rande.html#global-endpoints), so the region should not be necessary.
+[When you use the AWS SDK to submit requests, you can leave the Region and endpoint unspecified](https://docs.aws.amazon.com/general/latest/gr/r53.html#r53_region).
+
+This is a legacy of the original Route53 integration, which was developed at a time when cert-manager was expected to be running on non AWS managed clusters where neither the ambient `AWS_REGION` environment variable nor the EC2 instance metadata service were expected to be available.
+The maintainer are aware of this inconsistency and the validation will be relaxed in a future version of cert-manager.
+
+> 📖 Read [Route53: document use of "region" field](https://github.com/cert-manager/website/issues/56).
+
+#### Turn on Debug Logging
+
+If you set the cert-manager controller log level to `>=4` you will see AWS requests and responses among the log messages.
+
+> ℹ️ Available since cert-manager >=1.16
+>
+> 📖 Read about [`ClientLogMode` in AWS SDK for Go V2](https://aws.github.io/aws-sdk-go-v2/docs/configuring-sdk/logging/#clientlogmode).
+
+#### Beware of Route53 quotas
+
+[Amazon Route 53 API requests and entities are subject to the following quotas](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/DNSLimitations.html)
+
+#### Use `AWS_` environment variables to override defaults
+
+If necessary you can set any of the [Environment variables supported by the AWS SDK](https://docs.aws.amazon.com/sdkref/latest/guide/settings-reference.html#EVarSettings).
+You can set these using the [`extraEnv` value in the Helm chart](https://artifacthub.io/packages/helm/cert-manager/cert-manager/#extraenv-~-array).
