@@ -32,28 +32,52 @@ because there will be fewer TLS Secrets and fewer resources to be cached.
 > 📖️ Read [What Everyone Should Know About Kubernetes Memory Limits](https://home.robusta.dev/blog/kubernetes-memory-limit),
 > to learn how to right-size the memory requests.
 
-## Disable client-side rate limiting for Kubernetes API requests
+## Client-side rate limiting of Kubernetes API requests
 
-Like most Kubernetes clients, cert-manager has a client-side rate limiter,
-which throttles its requests to the Kubernetes API server:
-a token bucket allowing [20 queries per second, with bursts of up to 50](https://github.com/cert-manager/cert-manager/blob/v1.21.1/internal/apis/config/controller/v1alpha1/defaults.go#L58-L59).
-These default limits are too low for large scale deployments:
-for example, re-syncing tens of thousands of Certificate resources at 20 queries per second takes tens of minutes,
+Like all applications built on `client-go`, cert-manager ships with a client-side rate limiter:
+a token bucket which delays cert-manager's own requests to the Kubernetes API server
+once they exceed [20 queries per second, with bursts of up to 50](https://github.com/cert-manager/cert-manager/blob/v1.21.1/internal/apis/config/controller/v1alpha1/defaults.go#L58-L59).
+It dates from the era before the Kubernetes API server could protect itself from its clients,
+when well-behaved clients were expected to throttle themselves.
+
+That era ended with [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/)
+(enabled by default since Kubernetes 1.20, GA since 1.29),
+which protects the API server in a fundamentally different way from a rate limiter:
+
+- It limits how many requests each traffic class may have **in flight at once** — concurrency,
+  which is what actually determines API server load — rather than how many arrive per second.
+- Excess requests are **queued at the server** and dispatched as capacity frees up,
+  fairly interleaved so that a burst from one busy client
+  (such as cert-manager re-syncing every Certificate) cannot starve other clients.
+- Only when the queues overflow are requests **rejected with HTTP 429** and a `Retry-After` header,
+  which `client-go` responds to by backing off.
+
+There is no QPS or burst setting to tune in API Priority and Fairness,
+because it does not count requests per second at all: bursts are absorbed by its queues.
+
+On a cluster protected this way, a client-side rate limiter protects nothing;
+it only slows cert-manager down.
+During a mass re-sync of tens of thousands of Certificate resources,
+cert-manager trickles requests at 20 per second to an API server that is nowhere near capacity,
 and the only symptom is "client-side throttling" messages in the cert-manager logs.
-Client-side rate limiting was historically intended to protect the Kubernetes API server from being overwhelmed by its clients,
-but since Kubernetes 1.20 the API server protects itself using [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/),
-which limits the number of *concurrent* requests from each client and queues any excess,
-so client-side rate limiting is redundant and only slows cert-manager down.
+Worse, the limiter is shared by all of cert-manager's internal clients,
+including the one that renews its leader election lease,
+so sustained throttling can delay lease renewal.
+The Kubernetes ecosystem has reached the same conclusion:
+[controller-runtime disables the client-side rate limiter by default since v0.21](https://github.com/kubernetes-sigs/controller-runtime/pull/3119),
+on the advice of SIG API Machinery,
+and [Flux](https://github.com/fluxcd/pkg/issues/269) disables it when it detects API Priority and Fairness.
 
-**cert-manager `>= v1.21.0` disables client-side rate limiting automatically**
-when API Priority and Fairness is enabled on the API server.
-At startup, the cert-manager controller [probes the API server](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L514-L555)
+**cert-manager `>= v1.21.0` needs no configuration.**
+At startup, the controller [probes the API server](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L514-L555)
 for the response header which indicates that API Priority and Fairness is enabled,
-and if it is, [turns off the client-side rate limiter](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L303-L306).
-No configuration is needed.
+and if it is, [disables the client-side rate limiter](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L303-L306).
+If the probe fails, cert-manager falls back to client-side rate limiting.
 
 > ⚠️ In cert-manager `v1.21`, the `kubernetesAPIQPS` and `kubernetesAPIBurst` configuration options are ignored
 > when API Priority and Fairness is detected, even if you set them explicitly.
+> This matters if you *want* to cap cert-manager's request rate;
+> for example, on a managed control plane which meters or bills API requests.
 > Read [`cert-manager#9158`](https://github.com/cert-manager/cert-manager/issues/9158) for discussion of this limitation.
 
 **cert-manager `< v1.21.0` always applies the client-side rate limiter.**
@@ -69,11 +93,6 @@ config:
 > 🔗 Read [`cert-manager#8757`](https://github.com/cert-manager/cert-manager/pull/8757);
 > the pull request which introduced automatic detection of API Priority and Fairness,
 > fixing [`cert-manager#6890`: Allow client-side rate-limiting to be disabled](https://github.com/cert-manager/cert-manager/issues/6890).
->
-> 🔗 Other Kubernetes clients have made the same change:
-> [controller-runtime disables client-side rate limiting by default since v0.21](https://github.com/kubernetes-sigs/controller-runtime/pull/3119),
-> on the advice of SIG API Machinery,
-> and [Flux detects API Priority and Fairness in the same way as cert-manager](https://github.com/fluxcd/pkg/issues/269).
 >
 > 🔗 Read [`kubernetes#111880`: Disable client-side rate-limiting when AP&F is enabled](https://github.com/kubernetes/kubernetes/issues/111880);
 > a proposal that the `kubernetes.io/client-go` module should do this automatically.
