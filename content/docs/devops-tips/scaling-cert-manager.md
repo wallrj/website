@@ -71,14 +71,9 @@ and [Flux](https://github.com/fluxcd/pkg/issues/269) disables it when it detects
 **cert-manager `>= v1.21.0` needs no configuration.**
 At startup, the controller [probes the API server](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L514-L555)
 for the response header which indicates that API Priority and Fairness is enabled,
-and if it is, [disables the client-side rate limiter](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L303-L306).
-If the probe fails, cert-manager falls back to client-side rate limiting.
-
-> ⚠️ In cert-manager `v1.21`, the `kubernetesAPIQPS` and `kubernetesAPIBurst` configuration options are ignored
-> when API Priority and Fairness is detected, even if you set them explicitly.
-> This matters if you *want* to cap cert-manager's request rate;
-> for example, on a managed control plane which meters or bills API requests.
-> Read [`cert-manager#9158`](https://github.com/cert-manager/cert-manager/issues/9158) for discussion of this limitation.
+and if it is, disables the client-side rate limiter.
+If the probe fails, or API Priority and Fairness is not enabled,
+cert-manager falls back to client-side rate limiting at the default 20 queries per second.
 
 **cert-manager `< v1.21.0` always applies the client-side rate limiter.**
 You can raise its thresholds high enough that they are never reached, using the following Helm values:
@@ -89,6 +84,37 @@ config:
   kubernetesAPIQPS: 10000
   kubernetesAPIBurst: 10000
 ```
+
+### Rare cases where you may want to set hard client-side rate limits
+
+Most deployments should leave `kubernetesAPIQPS` and `kubernetesAPIBurst` unset
+and let cert-manager go as fast as API Priority and Fairness allows.
+Set them only when your goal is to cap cert-manager's request *rate*,
+rather than to protect the API server; for example:
+
+- Your managed control plane meters, bills, or alerts on API request volume.
+- You share a cluster and want cert-manager's background churn capped at a predictable rate,
+  regardless of how much capacity the API server has to spare.
+- API Priority and Fairness is disabled on your API server,
+  leaving client-side rate limiting as the only backpressure mechanism.
+
+If you set both options explicitly, cert-manager honors them,
+even when API Priority and Fairness is enabled:
+
+```yaml
+# helm-values.yaml
+config:
+  kubernetesAPIQPS: 20
+  kubernetesAPIBurst: 50
+```
+
+`kubernetesAPIQPS` is the sustained rate; `kubernetesAPIBurst` allows short spikes above it.
+Bear in mind that a hard limit revives the problems described above:
+reconciliation of every resource slows down during bursts of activity,
+and sustained throttling can delay leader election lease renewal.
+
+> ℹ️ cert-manager `v1.21` ignored these options whenever API Priority and Fairness was detected.
+> Read [`cert-manager#9158`](https://github.com/cert-manager/cert-manager/issues/9158) for the details.
 
 > 🔗 Read [`cert-manager#8757`](https://github.com/cert-manager/cert-manager/pull/8757);
 > the pull request which introduced automatic detection of API Priority and Fairness,
