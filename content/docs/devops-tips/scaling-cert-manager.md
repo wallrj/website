@@ -34,11 +34,30 @@ because there will be fewer TLS Secrets and fewer resources to be cached.
 
 ## Disable client-side rate limiting for Kubernetes API requests
 
-By default cert-manager [throttles the rate of requests to the Kubernetes API server](https://github.com/cert-manager/cert-manager/blob/b61de55abda95a4c273be0c8d3e6025fe8511573/internal/apis/config/controller/v1alpha1/defaults.go#L59-L60) to 20 queries per second.
-Historically this was intended to prevent cert-manager from overwhelming the Kubernetes API server,
-but modern versions of Kubernetes implement [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/),
-which obviates the need for client side throttling.
-You can increase the threshold of the client-side rate limiter using the following helm values:
+Like most Kubernetes clients, cert-manager has a client-side rate limiter,
+which throttles its requests to the Kubernetes API server:
+a token bucket allowing [20 queries per second, with bursts of up to 50](https://github.com/cert-manager/cert-manager/blob/v1.21.1/internal/apis/config/controller/v1alpha1/defaults.go#L58-L59).
+These default limits are too low for large scale deployments:
+for example, re-syncing tens of thousands of Certificate resources at 20 queries per second takes tens of minutes,
+and the only symptom is "client-side throttling" messages in the cert-manager logs.
+Client-side rate limiting was historically intended to protect the Kubernetes API server from being overwhelmed by its clients,
+but since Kubernetes 1.20 the API server protects itself using [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/),
+which limits the number of *concurrent* requests from each client and queues any excess,
+so client-side rate limiting is redundant and only slows cert-manager down.
+
+**cert-manager `>= v1.21.0` disables client-side rate limiting automatically**
+when API Priority and Fairness is enabled on the API server.
+At startup, the cert-manager controller [probes the API server](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L514-L555)
+for the response header which indicates that API Priority and Fairness is enabled,
+and if it is, [turns off the client-side rate limiter](https://github.com/cert-manager/cert-manager/blob/v1.21.1/pkg/controller/context.go#L303-L306).
+No configuration is needed.
+
+> ⚠️ In cert-manager `v1.21`, the `kubernetesAPIQPS` and `kubernetesAPIBurst` configuration options are ignored
+> when API Priority and Fairness is detected, even if you set them explicitly.
+> Read [`cert-manager#9158`](https://github.com/cert-manager/cert-manager/issues/9158) for discussion of this limitation.
+
+**cert-manager `< v1.21.0` always applies the client-side rate limiter.**
+You can raise its thresholds high enough that they are never reached, using the following Helm values:
 
 ```yaml
 # helm-values.yaml
@@ -47,15 +66,17 @@ config:
   kubernetesAPIBurst: 10000
 ```
 
-> ℹ️ This does not technically disable the client-side rate-limiting but configures the QPS and Burst values high enough that they are never reached.
+> 🔗 Read [`cert-manager#8757`](https://github.com/cert-manager/cert-manager/pull/8757);
+> the pull request which introduced automatic detection of API Priority and Fairness,
+> fixing [`cert-manager#6890`: Allow client-side rate-limiting to be disabled](https://github.com/cert-manager/cert-manager/issues/6890).
 >
-> 🔗 Read [`cert-manager#6890`: Allow client-side rate-limiting to be disabled](https://github.com/cert-manager/cert-manager/issues/6890);
-> a proposal for a cert-manager configuration option to disable client-side rate-limiting.
+> 🔗 Other Kubernetes clients have made the same change:
+> [controller-runtime disables client-side rate limiting by default since v0.21](https://github.com/kubernetes-sigs/controller-runtime/pull/3119),
+> on the advice of SIG API Machinery,
+> and [Flux detects API Priority and Fairness in the same way as cert-manager](https://github.com/fluxcd/pkg/issues/269).
 >
 > 🔗 Read [`kubernetes#111880`: Disable client-side rate-limiting when AP&F is enabled](https://github.com/kubernetes/kubernetes/issues/111880);
-> a proposal that the `kubernetes.io/client-go` module should automatically use server-side rate-limiting when it is enabled.
->
-> 🔗 Read about other projects that disable client-side rate limiting: [Flux](https://github.com/fluxcd/pkg/issues/269).
+> a proposal that the `kubernetes.io/client-go` module should do this automatically.
 >
 > 📖 Read [API documentation for ControllerConfiguration](../reference/api-docs.md#controller.config.cert-manager.io/v1alpha1.ControllerConfiguration) for a description of the `kubernetesAPIQPS` and `kubernetesAPIBurst` configuration options.
 
